@@ -2,8 +2,8 @@ use pyo3::{exceptions::PyBaseException, prelude::*};
 use std::collections::HashMap;
 
 use a_sabr::{
-    contact_manager::segmentation::seg::SegmentationManager,
-    contact_plan::from_tvgutil_file::TVGUtilContactPlan,
+    contact_manager::legacy::evl::EVLManager,
+    contact_plan::{asabr_file_lexer::FileLexer, from_asabr_lexer::ASABRContactPlan},
     node_manager::none::NoManagement,
     routing::{aliases::*, Router},
     types::{Date, NodeID},
@@ -16,7 +16,7 @@ use crate::{py_asabr_bundle::PyAsabrBundle, py_asabr_contact::PyAsabrContact};
 #[pyclass(name = "AsabrRouter", unsendable)]
 pub struct PyAsabrRouter {
     nodes_id_map: HashMap<String, NodeID>,
-    router: Box<dyn Router<NoManagement, SegmentationManager>>,
+    router: Box<dyn Router<NoManagement, EVLManager>>,
 }
 
 fn make_nodes_id_map(vertices: &Vec<Vertex<NoManagement>>) -> HashMap<String, NodeID> {
@@ -38,14 +38,14 @@ fn make_nodes_id_map(vertices: &Vec<Vertex<NoManagement>>) -> HashMap<String, No
 impl PyAsabrRouter {
     #[new]
     fn new(tvgutil_contact_plan_filepath: &str, router_type: &str) -> PyResult<Self> {
-        let contact_plan = TVGUtilContactPlan::parse::<NoManagement, SegmentationManager>(
-            tvgutil_contact_plan_filepath,
-        );
+        let mut mylexer = FileLexer::new(tvgutil_contact_plan_filepath).unwrap();
+        let contact_plan =
+            ASABRContactPlan::parse::<NoManagement, EVLManager>(&mut mylexer, None, None);
 
         match contact_plan {
             Ok(cp) => {
                 let nodes_id_map = make_nodes_id_map(&cp.vertices);
-                let router = build_generic_router::<NoManagement, SegmentationManager>(
+                let router = build_generic_router::<NoManagement, EVLManager>(
                     router_type,
                     cp,
                     Some(SpsnOptions {
