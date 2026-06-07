@@ -1,9 +1,13 @@
 use pyo3::{exceptions::PyBaseException, prelude::*};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{BufRead, BufReader},
+};
 
 use a_sabr::{
-    contact_manager::segmentation::seg::SegmentationManager,
-    contact_plan::from_tvgutil_file::TVGUtilContactPlan,
+    contact_manager::legacy::evl::EVLManager,
+    contact_plan::{asabr_file_lexer::FileLexer, from_asabr_lexer::ASABRContactPlan},
     node_manager::none::NoManagement,
     routing::{aliases::*, Router},
     types::{Date, NodeID},
@@ -16,7 +20,8 @@ use crate::{py_asabr_bundle::PyAsabrBundle, py_asabr_contact::PyAsabrContact};
 #[pyclass(name = "AsabrRouter", unsendable)]
 pub struct PyAsabrRouter {
     nodes_id_map: HashMap<String, NodeID>,
-    router: Box<dyn Router<NoManagement, SegmentationManager>>,
+    all_contacts: Vec<PyAsabrContact>,
+    router: Box<dyn Router<NoManagement, EVLManager>>,
 }
 
 fn make_nodes_id_map(vertices: &Vec<Vertex<NoManagement>>) -> HashMap<String, NodeID> {
@@ -37,15 +42,29 @@ fn make_nodes_id_map(vertices: &Vec<Vertex<NoManagement>>) -> HashMap<String, No
 #[pymethods]
 impl PyAsabrRouter {
     #[new]
-    fn new(tvgutil_contact_plan_filepath: &str, router_type: &str) -> PyResult<Self> {
-        let contact_plan = TVGUtilContactPlan::parse::<NoManagement, SegmentationManager>(
-            tvgutil_contact_plan_filepath,
-        );
+    fn new(asabr_contact_plan_filepath: &str, router_type: &str) -> PyResult<Self> {
+        let file = File::open(asabr_contact_plan_filepath).unwrap();
+        let lines: Vec<String> = BufReader::new(file).lines().map(|l| l.unwrap()).collect();
+        let mut mylexer = FileLexer::new(lines.iter().map(|s| s.as_str()));
+        let contact_plan =
+            ASABRContactPlan::parse::<NoManagement, EVLManager>(&mut mylexer, None, None);
 
         match contact_plan {
             Ok(cp) => {
                 let nodes_id_map = make_nodes_id_map(&cp.vertices);
-                let router = build_generic_router::<NoManagement, SegmentationManager>(
+                let all_contacts: Vec<PyAsabrContact> = cp
+                    .contacts
+                    .iter()
+                    .map(|c| {
+                        PyAsabrContact::from_raw(
+                            c.info.tx_node_id,
+                            c.info.rx_node_id,
+                            c.info.start,
+                            c.info.end,
+                        )
+                    })
+                    .collect();
+                let router = build_generic_router::<NoManagement, EVLManager>(
                     router_type,
                     cp,
                     Some(SpsnOptions {
@@ -60,6 +79,7 @@ impl PyAsabrRouter {
 
                 Ok(Self {
                     nodes_id_map,
+                    all_contacts,
                     router,
                 })
             }
@@ -112,5 +132,15 @@ impl PyAsabrRouter {
                 node_name
             )))
         }
+    }
+
+    /// Return all known nodes as a dict mapping node name to A-SABR node ID.
+    fn get_all_nodes(&self) -> HashMap<String, NodeID> {
+        self.nodes_id_map.clone()
+    }
+
+    /// Return all contacts from the contact plan.
+    fn get_all_contacts(&self) -> Vec<PyAsabrContact> {
+        self.all_contacts.clone()
     }
 }

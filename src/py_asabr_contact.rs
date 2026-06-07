@@ -3,12 +3,13 @@ use std::{cell::RefCell, rc::Rc};
 
 use a_sabr::{
     contact::Contact,
-    contact_manager::segmentation::seg::SegmentationManager,
+    contact_manager::legacy::evl::EVLManager,
     node_manager::none::NoManagement,
     types::{Date, NodeID},
 };
 
 #[pyclass(name = "AsabrContact")]
+#[derive(Clone)]
 pub struct PyAsabrContact {
     #[pyo3(get)]
     contact_id: usize,
@@ -23,9 +24,17 @@ pub struct PyAsabrContact {
 }
 
 impl PyAsabrContact {
-    pub fn from_native_contact(
-        contact: &Rc<RefCell<Contact<NoManagement, SegmentationManager>>>,
-    ) -> Self {
+    pub fn from_raw(tx_node: NodeID, rx_node: NodeID, start_time: Date, end_time: Date) -> Self {
+        Self {
+            contact_id: 0,
+            tx_node,
+            rx_node,
+            start_time,
+            end_time,
+        }
+    }
+
+    pub fn from_native_contact(contact: &Rc<RefCell<Contact<NoManagement, EVLManager>>>) -> Self {
         let contact_id = Rc::as_ptr(contact) as usize;
         let contact = contact.borrow();
 
